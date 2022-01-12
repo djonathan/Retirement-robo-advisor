@@ -1,6 +1,17 @@
+import json
+
+
+
 ### Required Libraries ###
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
+
+risk_dict = {
+    "None": "100% bonds (AGG), 0% equities (SPY)",
+    "Low": "60% bonds (AGG), 40% equities (SPY)",
+    "Medium": "40% bonds (AGG), 60% equities (SPY)",
+    "High": "20% bonds (AGG), 80% equities (SPY)",
+}
 
 ### Functionality Helper Functions ###
 def parse_int(n):
@@ -111,21 +122,102 @@ In this section, you will create an Amazon Lambda function that will validate th
 
 """
 
+def validate_data(age, investment, risk, intent_request):
+    """
+    Validates the data provided by the user.
+    """
 
+    # Validate that the user is over 21 years old
+    if age is not None:
+        age = int(age)
+        if age < 0 or age > 65:
+            return build_validation_result(
+                False,
+                "age",
+                "Please provide an age between 1 and 65.",
+            )
+
+    # Validate the investment amount, it should be >= 5000
+    if investment is not None:
+        investment = int(investment)
+        if investment <= 5000:
+            return build_validation_result(
+                False,
+                "investmentAmount",
+                "The amount to invest should be at least 5000, "
+                "please provide a correct amount in dollars to invest.",
+            )
+
+    # Validate if a correct curerency was passed
+    if risk is not None:
+        if risk not in ["None", "Low", "Medium", "High"]:
+            return build_validation_result(
+                False,
+                "riskLevel",
+                "Please enter an acceptable risk level of None, Low, Medium, or High.",
+            )
+
+    # A True results is returned if age or amount are valid
+    return build_validation_result(True, None, None)
+    
+    
 ### Intents Handlers ###
 def recommend_portfolio(intent_request):
     """
     Performs dialog management and fulfillment for recommending a portfolio.
     """
-
     first_name = get_slots(intent_request)["firstName"]
     age = get_slots(intent_request)["age"]
     investment_amount = get_slots(intent_request)["investmentAmount"]
     risk_level = get_slots(intent_request)["riskLevel"]
+
+    # Gets the invocation source, for Lex dialogs "DialogCodeHook" is expected.
     source = intent_request["invocationSource"]
 
-    # YOUR CODE GOES HERE!
+    if source == "DialogCodeHook":
+        # This code performs basic validation on the supplied input slots.
 
+        # Gets all the slots
+        slots = get_slots(intent_request)
+
+        # Validates user's input using the validate_data function
+        validation_result = validate_data(age, investment_amount, risk_level, intent_request)
+    
+        # If the data provided by the user is not valid,
+        # the elicitSlot dialog action is used to re-prompt for the first violation detected.
+        if not validation_result["isValid"]:
+            slots[validation_result["violatedSlot"]] = None  # Cleans invalid slot
+
+            # Returns an elicitSlot dialog to request new data for the invalid slot
+            return elicit_slot(
+                intent_request["sessionAttributes"],
+                intent_request["currentIntent"]["name"],
+                slots,
+                validation_result["violatedSlot"],
+                validation_result["message"],
+            )
+
+        # Fetch current session attributes
+        output_session_attributes = intent_request["sessionAttributes"]
+
+        # Once all slots are valid, a delegate dialog is returned to Lex to choose the next course of action.
+        return delegate(output_session_attributes, get_slots(intent_request))
+        
+    
+        
+    # Return a message with conversion's result.
+    return close(
+        intent_request["sessionAttributes"],
+        "Fulfilled",
+        {
+            "contentType": "PlainText",
+            "content": """Thank you for your information;
+            We recommend that your ${} be invested in a portfolio weighted {}.
+            """.format(
+                investment_amount, risk_dict[risk_level]
+            ),
+        },
+    )
 
 ### Intents Dispatcher ###
 def dispatch(intent_request):
